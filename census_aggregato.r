@@ -59,7 +59,6 @@ column_level_validation <- function(dataframe, column, supported){
 contingent_column_validation <- function(dataframe, col1, col2){
   
   # validate inputs where col1 must be specified if col2 is specified
-  
   error = 0
   for(row in 1:dim(dataframe)[1]){
     if(!is.na(dataframe[[col2]][row])){
@@ -103,6 +102,8 @@ get_acs_wrapper <- function(dataset){
   
   for(row in 1:dim(dataset)[1]){
     
+    print(dataset[row,])
+    
     # remove all whitespace with a regular expression
     cleaned <- gsub("\\s", "", dataset$table_fields[row], fixed=FALSE)
     
@@ -121,11 +122,19 @@ get_acs_wrapper <- function(dataset){
     }
     
     #### make the call to the ACS API
-    # zcta and urban area must be retrieved for whole country
-    national_geographies <- c('zcta', 'urban area', 'school district (unified)',
+    
+    # these geographies must be retrieved for whole country
+    national_geographies <- c('urban area', 'school district (unified)',
                               'metropolitan statistical area/micropolitan statistical area', # this means cbsa
                               'state legislative district (upper chamber)',
                               'state legislative district (lower chamber)')
+    
+    # as of 5/2021, zcta is now organized by state and retrieved at the state level
+    print(as.numeric(as.character(dataset$year[row])))
+    if(as.numeric(as.character(dataset$year[row])) < 2019){
+      national_geographies <- c(national_geographies, 'zcta')
+    }
+    
     if(dataset$geography[row] %in% national_geographies){
       acs_data <- get_acs(geography=dataset$geography[row], year=dataset$year[row],
                           variables=var_set, survey="acs5", show_call=TRUE)
@@ -136,6 +145,8 @@ get_acs_wrapper <- function(dataset){
     acs_data$variable_type <- dataset$variable_type[row]
     acs_data$out_table_field <- dataset$out_table_field[row]
     acs_data$agg_fxn <- dataset$agg_fxn[row]
+    acs_data$geotype <- dataset$geography[row]
+    acs_data$year <- dataset$year[row]
     
     # add to overall data output
     derived_datasets <- rbind(derived_datasets, acs_data)
@@ -174,6 +185,7 @@ names(column_classes) <- c('table', 'table_fields', 'year', 'geography', 'state'
 # read the local copy
 ACS_VARS <- read.delim(local_file$local_path, sep='\t', header=TRUE,
                        colClasses = column_classes, na.strings="")
+ACS_VARS <- ACS_VARS[rowSums(is.na(ACS_VARS)) != ncol(ACS_VARS),] # rm rows that are completely NA
 
 ############################################
 # Input validation                         #
@@ -215,60 +227,67 @@ list_idx = 1
 ############################################
 
 direct <- ACS_VARS %>% filter(variable_type != 'custom')
-direct_data <- get_acs_wrapper(direct)
 
-# only calculate sqrt(sse) for variables requiring margin of error calc
-if('moe' %in% unique(direct_data$variable_type)){
-  direct_moe <- direct_data %>% filter(variable_type == 'moe') %>% group_by(GEOID, out_table_field) %>% summarize(agg_moe = agg_moe(moe))
-  direct_moe <- direct_moe %>% pivot_wider(id_cols='GEOID', names_from='out_table_field', values_from='agg_moe')
-  final_datasets[[list_idx]] = direct_moe
-  list_idx = list_idx + 1
+if(dim(direct)[1] > 0){
+  direct_data <- get_acs_wrapper(direct)
+  
+  # only calculate sqrt(sse) for variables requiring margin of error calc
+  if('moe' %in% unique(direct_data$variable_type)){
+    direct_moe <- direct_data %>% filter(variable_type == 'moe') %>% group_by(GEOID, out_table_field, geotype, year) %>% summarize(agg_moe = agg_moe(moe))
+    direct_moe <- direct_moe %>% pivot_wider(id_cols=c('GEOID', 'geotype', 'year'), names_from='out_table_field', values_from='agg_moe')
+    final_datasets[[list_idx]] = direct_moe
+    list_idx = list_idx + 1
+  }
+  
+  # only calculate sum(est) for variables requiring sum calc
+  if('estimate' %in% unique(direct_data$variable_type)){
+    direct_est <- direct_data %>% filter(variable_type == 'estimate') %>% group_by(GEOID, out_table_field, geotype, year) %>% summarize(agg_est = sum(estimate))
+    direct_est_wide <- direct_est %>% pivot_wider(id_cols=c('GEOID', 'geotype', 'year'), names_from='out_table_field', values_from='agg_est')
+    final_datasets[[list_idx]] = direct_est_wide
+    list_idx = list_idx + 1
+  }
 }
 
-# only calculate sum(est) for variables requiring sum calc
-if('estimate' %in% unique(direct_data$variable_type)){
-  direct_est <- direct_data %>% filter(variable_type == 'estimate') %>% group_by(GEOID, out_table_field) %>% summarize(agg_est = sum(estimate))
-  direct_est_wide <- direct_est %>% pivot_wider(id_cols='GEOID', names_from='out_table_field', values_from='agg_est')
-  final_datasets[[list_idx]] = direct_est_wide
-  list_idx = list_idx + 1
-}
 
 
 ############################################
 # SVI Variables Derived from ACS           #
 ############################################
 
+vtypes <- unique(ACS_VARS$variable_type)
+
 derived <- ACS_VARS %>% filter(variable_type == 'percent' | variable_type == 'difference')
-derived_data <- get_acs_wrapper(derived)
-
-# calculate the percentages
-if('percent' %in% unique(derived_data$variable_type)){
-  derived_est_pct <- derived_data %>% filter(variable_type == 'percent') %>% group_by(GEOID, out_table_field) %>% summarize(agg_est = sum(estimate))
-  pct_depends <- left_join(derived_est_pct, derived, by=c('out_table_field'='out_table_field'))
-  # currently supported percentage cases collect the numerator as a direct variable and the denominator dependent on numerator collection
-  # clearly that workflow needs some work to be more intuitive...
-  pct_all <- left_join(pct_depends, direct_est, by=c('depends_on_var'='out_table_field', 'GEOID'='GEOID'), suffix=c('_denominator', '_numerator'))
-  pct_all$agg_est <- (pct_all$agg_est_numerator / pct_all$agg_est_denominator) * 100
-  pct_all <- pct_all[, names(pct_all) %in% c('GEOID', 'out_table_field', 'agg_est')]
-  pct_all_wide <- pct_all %>% pivot_wider(id_cols='GEOID', names_from='out_table_field', values_from='agg_est')
-  final_datasets[[list_idx]] = pct_all_wide
-  list_idx = list_idx + 1
+if(dim(derived)[1] > 0){
+  derived_data <- get_acs_wrapper(derived)
+  
+  # calculate the percentages
+  if('percent' %in% unique(derived_data$variable_type)){
+    derived_est_pct <- derived_data %>% filter(variable_type == 'percent') %>% group_by(GEOID, out_table_field, geotype, year) %>% summarize(agg_est = sum(estimate))
+    pct_depends <- left_join(derived_est_pct, derived, by=c('out_table_field'='out_table_field'))
+    # currently supported percentage cases collect the numerator as a direct variable and the denominator dependent on numerator collection
+    # clearly that workflow needs some work to be more intuitive...
+    pct_all <- left_join(pct_depends, direct_est, by=c('depends_on_var'='out_table_field', 'GEOID'='GEOID', 'year'='year', 'geotype'='geotype'), suffix=c('_denominator', '_numerator'))
+    pct_all$agg_est <- (pct_all$agg_est_numerator / pct_all$agg_est_denominator) * 100
+    pct_all <- pct_all[, names(pct_all) %in% c('GEOID', 'out_table_field', 'agg_est', 'geotype', 'year')]
+    pct_all_wide <- pct_all %>% pivot_wider(id_cols=c('GEOID', 'geotype', 'year'), names_from='out_table_field', values_from='agg_est')
+    final_datasets[[list_idx]] = pct_all_wide
+    list_idx = list_idx + 1
+  }
+  
+  # calculate the differences
+  if('difference' %in% unique(derived_data$variable_type)){
+    derived_est_diff <- derived_data %>% filter(variable_type == 'difference') %>% group_by(GEOID, out_table_field, geotype, year) %>% summarize(agg_est = sum(estimate))
+    diff_depends <- left_join(derived_est_diff, derived, by=c('out_table_field'='out_table_field'))
+    # currently supported percentage cases collect the larger value as a direct variable and the smaller value dependent on larger value collection
+    # clearly that workflow needs some work to be more intuitive...
+    diff_all <- left_join(diff_depends, direct_est, by=c('depends_on_var'='out_table_field', 'GEOID'='GEOID', 'year'='year', 'geotype'='geotype'), suffix=c('_subset', '_total'))
+    diff_all$agg_est <- diff_all$agg_est_total - diff_all$agg_est_subset
+    diff_all <- diff_all[, names(diff_all) %in% c('GEOID', 'out_table_field', 'agg_est', 'year', 'geotype')]
+    diff_all_wide <- diff_all %>% pivot_wider(id_cols=c('GEOID', 'year', 'geotype'), names_from='out_table_field', values_from='agg_est')
+    final_datasets[[list_idx]] = diff_all_wide
+    list_idx = list_idx + 1
+  }
 }
-
-# calculate the differences
-if('difference' %in% unique(derived_data$variable_type)){
-  derived_est_diff <- derived_data %>% filter(variable_type == 'difference') %>% group_by(GEOID, out_table_field) %>% summarize(agg_est = sum(estimate))
-  diff_depends <- left_join(derived_est_diff, derived, by=c('out_table_field'='out_table_field'))
-  # currently supported percentage cases collect the larger value as a direct variable and the smaller value dependent on larger value collection
-  # clearly that workflow needs some work to be more intuitive...
-  diff_all <- left_join(diff_depends, direct_est, by=c('depends_on_var'='out_table_field', 'GEOID'='GEOID'), suffix=c('_subset', '_total'))
-  diff_all$agg_est <- diff_all$agg_est_total - diff_all$agg_est_subset
-  diff_all <- diff_all[, names(diff_all) %in% c('GEOID', 'out_table_field', 'agg_est')]
-  diff_all_wide <- diff_all %>% pivot_wider(id_cols='GEOID', names_from='out_table_field', values_from='agg_est')
-  final_datasets[[list_idx]] = diff_all_wide
-  list_idx = list_idx + 1
-}
-
 
 custom <- ACS_VARS %>% filter(variable_type == 'custom')
 print(
@@ -280,8 +299,11 @@ print(
 ############################################
 
 base_data <- final_datasets[[1]]
-for(i in 2:length(final_datasets)){
-  base_data <- full_join(base_data, final_datasets[[i]], by='GEOID')
+print(base_data)
+if(length(final_datasets) > 1){
+  for(i in 2:length(final_datasets)){
+    base_data <- full_join(base_data, final_datasets[[i]], by=c('GEOID', 'geotype', 'year'), keep=TRUE)
+  }
 }
 
 sheet_base <- str_split(SHEET_NAME, '/')[[1]]
