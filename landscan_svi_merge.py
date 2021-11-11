@@ -98,6 +98,10 @@ class AnnualSVI:
         dollars_wide_indexed = self.dollars_wide.set_index('GEOID')
 
         weighted_svi = pd.merge(self.weighted_landscan, svi_wide_indexed, left_index=True, right_index=True, how='left')
+
+        # we don't need the weights for dollars, but we do the merge here for consistency of workflow
+        # PCI and median hh rent as income pct are one-to-many joined with landscan;
+        # landscan columns will be dropped and those variables will be averaged when xarray is coarsened
         weighted_dollars = pd.merge(self.weighted_landscan, dollars_wide_indexed, left_index=True, right_index=True, how='left')
 
         return weighted_svi, weighted_dollars
@@ -142,21 +146,58 @@ class AnnualSVI:
 
         data_subset_xr_30arcsec.to_netcdf(path=self.save_template.format(svi_column, self.year))
 
-        return data_subset_xr_30arcsec
+        return
+
+    def dollars_xarray(self, dollar_column):
+
+        # we don't want to average income and rents across areas that actually have no people
+        populated = self.weighted_dollars[self.weighted_dollars['average_population'] > 0]
+        tract_dollars = populated.set_index(['x', 'y'])[[dollar_column]]
+
+        # converting the sparse dataframe will fill in the empty values with NaN
+        # NaN values are ignored in the mean calculation
+        tract_dollars_xr = tract_dollars.to_xarray()
+        tract_dollars_xr_coarse = tract_dollars_xr.coarsen(
+            boundary='pad',
+            x=10,
+            y=10,
+        ).mean(skipna=True).compute()
+
+        # mask areas with zero population
+        tract_dollars_xr_coarse = tract_dollars_xr_coarse.where(tract_dollars_xr_coarse > 0)
+
+        tract_dollars_xr_coarse.to_netcdf(path=self.save_template.format(dollar_column, self.year))
+
+        return
 
     def process(self):
 
-        for key, value in self.mapping.items():
-            save_path = self.save_template.format(key, self.year)
-            if os.path.exists(save_path):
-                print('Skipping already processed variable {} for year {}'.format(key, self.year))
+        # process dollars
+        for d in ['MEDIAN_GROSS_RENT_PCT_HH_INCOME', 'PCI']:
+            dollar_save_path = self.save_template.format(d, self.year)
+            if os.path.exists(dollar_save_path):
+                print('Skipping already processed variable {} for year {}'.format(d, self.year))
             else:
-                print('Processing variable {} for year {}'.format(key, self.year))
-                try:
-                    self.svi_xarray(svi_column=key, total_column=value)
-                except MemoryError:
-                    print('Memory error encountered processing variable {} for year {}'.format(key, self.year))
-                    print('Rough estimate of memory used by weighted SVI dataframe: {}'.format(sys.getsizeof(self.weighted_svi)))
+                print('Processing variable {} for year {}'.format(d, self.year))
+                self.dollars_xarray(dollar_column=d)
+
+        # process SVI
+        for key, value in self.mapping.items():
+
+            # skip the "total" columns
+            if key != value:
+
+                # skip columns that have already been processed
+                save_path = self.save_template.format(key, self.year)
+                if os.path.exists(save_path):
+                    print('Skipping already processed variable {} for year {}'.format(key, self.year))
+                else:
+                    print('Processing variable {} for year {}'.format(key, self.year))
+                    try:
+                        self.svi_xarray(svi_column=key, total_column=value)
+                    except MemoryError:
+                        print('Memory error encountered processing variable {} for year {}'.format(key, self.year))
+                        print('Rough estimate of memory used by weighted SVI dataframe: {}'.format(sys.getsizeof(self.weighted_svi)))
 
 
 def main(db_path, landscan_path, save_template):
@@ -169,7 +210,6 @@ def main(db_path, landscan_path, save_template):
             save_template=save_template
         )
         a.process()
-        del a  # clear up memory
 
 
 if __name__ == '__main__':
