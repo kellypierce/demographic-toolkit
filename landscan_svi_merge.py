@@ -1,6 +1,7 @@
 import pandas as pd
 from spatialpandas.io import read_parquet
 import numpy as np
+import os
 import xarray as xr
 import sqlite3
 
@@ -107,7 +108,11 @@ class AnnualSVI:
         percents = '{}_LANDSCAN_PERCENT'
 
         # subset the data and calculate the landscan count estimate
-        data_subset = self.weighted_svi[['x', 'y', 'landscan_weight', svi_column, total_column]].reset_index()
+        try:
+            data_subset = self.weighted_svi[['x', 'y', 'landscan_weight', svi_column, total_column]].reset_index()
+        except KeyError:
+            print('Variable {} not in data for year {}'.format(svi_column, self.year))
+            return
         data_subset[counts.format(svi_column)] = data_subset['landscan_weight'] * (data_subset[svi_column])
         data_subset[total.format(total_column)] = data_subset['landscan_weight'] * data_subset[total_column]
 
@@ -141,7 +146,11 @@ class AnnualSVI:
     def process(self):
 
         for key, value in self.mapping.items():
-            self.svi_xarray(svi_column=key, total_column=value)
+            save_path = self.save_template.format(key, self.year)
+            if os.path.exists(save_path):
+                print('Skipping already processed variable {} for year {}'.format(key, self.year))
+            else:
+                self.svi_xarray(svi_column=key, total_column=value)
 
 
 def main(db_path, landscan_path, save_template):
