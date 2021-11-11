@@ -2,6 +2,7 @@ import pandas as pd
 from spatialpandas.io import read_parquet
 import numpy as np
 import os
+import sys
 import xarray as xr
 import sqlite3
 
@@ -150,7 +151,12 @@ class AnnualSVI:
             if os.path.exists(save_path):
                 print('Skipping already processed variable {} for year {}'.format(key, self.year))
             else:
-                self.svi_xarray(svi_column=key, total_column=value)
+                print('Processing variable {} for year {}'.format(key, self.year))
+                try:
+                    self.svi_xarray(svi_column=key, total_column=value)
+                except MemoryError:
+                    print('Memory error encountered processing variable {} for year {}'.format(key, self.year))
+                    print('Rough estimate of memory used by weighted SVI dataframe: {}'.format(sys.getsizeof(self.weighted_svi)))
 
 
 def main(db_path, landscan_path, save_template):
@@ -163,6 +169,7 @@ def main(db_path, landscan_path, save_template):
             save_template=save_template
         )
         a.process()
+        del a  # clear up memory
 
 
 if __name__ == '__main__':
