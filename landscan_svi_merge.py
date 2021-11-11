@@ -81,10 +81,10 @@ class AnnualSVI:
             columns={'average_population': 'landscan_tract_total_pop'})
 
         # one-to-many join to set up weight calculation
-        weighted_landscan  = pd.merge(self.landscan, rdf_grouped, left_on='GEOID', right_on='GEOID', how='left')
+        weighted_landscan = pd.merge(self.landscan, rdf_grouped, left_on='GEOID', right_on='GEOID', how='left')
 
         # perform weight calcuation
-        weighted_landscan['landscan_weight'] = self.weighted_landscan['average_population'] / self.weighted_landscan['landscan_tract_total_pop']
+        weighted_landscan['landscan_weight'] = weighted_landscan['average_population'] / weighted_landscan['landscan_tract_total_pop']
 
         return weighted_landscan
 
