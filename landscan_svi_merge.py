@@ -150,9 +150,7 @@ class AnnualSVI:
 
     def dollars_xarray(self, dollar_column):
 
-        # we don't want to average income and rents across areas that actually have no people
-        populated = self.weighted_dollars[self.weighted_dollars['average_population'] > 0]
-        tract_dollars = populated.set_index(['x', 'y'])[[dollar_column]]
+        tract_dollars = self.weighted_dollars.set_index(['x', 'y'])[[dollar_column]]
 
         # converting the sparse dataframe will fill in the empty values with NaN
         # NaN values are ignored in the mean calculation
@@ -162,9 +160,6 @@ class AnnualSVI:
             x=10,
             y=10,
         ).mean(skipna=True).compute()
-
-        # mask areas with zero population
-        tract_dollars_xr_coarse = tract_dollars_xr_coarse.where(tract_dollars_xr_coarse > 0)
 
         tract_dollars_xr_coarse.to_netcdf(path=self.save_template.format(dollar_column, self.year))
 
