@@ -195,16 +195,15 @@ class AnnualSVI:
                         print('Rough estimate of memory used by weighted SVI dataframe: {}'.format(sys.getsizeof(self.weighted_svi)))
 
 
-def main(db_path, landscan_path, save_template):
+def main(db_path, landscan_path, year, save_template):
 
-    for y in [2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019]:
-        a = AnnualSVI(
-            db_path=db_path,
-            landscan_path=landscan_path,
-            year=y,
-            save_template=save_template
-        )
-        a.process()
+    a = AnnualSVI(
+        db_path=db_path,
+        landscan_path=landscan_path,
+        year=year,
+        save_template=save_template
+    )
+    a.process()
 
 
 if __name__ == '__main__':
@@ -213,9 +212,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--db_path', help='path to sqlite database file')
     parser.add_argument('-l', '--landscan', help='path to parquet format landscan + census tract spatial join')
+    parser.add_argument('-y', '--year', help='year of census data to process')
     parser.add_argument('-s', '--save_template', help='string template for formatting save path')
 
     opts = parser.parse_args()
 
     # "/scratch1/06134/kpierce/landscan/{}_{}_landscan_30arcsecond_masked_xr_20211111.nc"
-    main(db_path=opts.db_path, landscan_path=opts.landscan, save_template=opts.save_template)
+    main(db_path=opts.db_path, landscan_path=opts.landscan, year=opts.year, save_template=opts.save_template)
