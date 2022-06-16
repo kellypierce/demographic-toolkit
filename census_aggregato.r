@@ -102,8 +102,6 @@ get_acs_wrapper <- function(dataset){
   
   for(row in 1:dim(dataset)[1]){
     
-    print(dataset[row,])
-    
     # remove all whitespace with a regular expression
     cleaned <- gsub("\\s", "", dataset$table_fields[row], fixed=FALSE)
     
@@ -129,9 +127,8 @@ get_acs_wrapper <- function(dataset){
                               'state legislative district (upper chamber)',
                               'state legislative district (lower chamber)')
     
-    # as of 5/2021, zcta is now organized by state and retrieved at the state level
-    print(as.numeric(as.character(dataset$year[row])))
-    if(as.numeric(as.character(dataset$year[row])) < 2019){
+    # as of 5/2021, zcta is now organized by state and retrieved at the state level FOR 2019 ONLY
+    if(as.numeric(as.character(dataset$year[row])) != 2019){
       national_geographies <- c(national_geographies, 'zcta')
     }
     
@@ -229,6 +226,7 @@ list_idx = 1
 direct <- ACS_VARS %>% filter(variable_type != 'custom')
 
 if(dim(direct)[1] > 0){
+  print('Processing direct variables.')
   direct_data <- get_acs_wrapper(direct)
   
   # only calculate sqrt(sse) for variables requiring margin of error calc
@@ -258,12 +256,15 @@ vtypes <- unique(ACS_VARS$variable_type)
 
 derived <- ACS_VARS %>% filter(variable_type == 'percent' | variable_type == 'difference')
 if(dim(derived)[1] > 0){
+  print('Processing derived variables.')
   derived_data <- get_acs_wrapper(derived)
   
   # calculate the percentages
   if('percent' %in% unique(derived_data$variable_type)){
+    print('Calculating percentages.')
+    derived_pct <- derived %>% filter(variable_type == 'percent')
     derived_est_pct <- derived_data %>% filter(variable_type == 'percent') %>% group_by(GEOID, out_table_field, geotype, year) %>% summarize(agg_est = sum(estimate))
-    pct_depends <- left_join(derived_est_pct, derived, by=c('out_table_field'='out_table_field'))
+    pct_depends <- left_join(derived_est_pct, derived_pct, by=c('out_table_field'='out_table_field', 'year'='year', 'geotype'='geography'))
     # currently supported percentage cases collect the numerator as a direct variable and the denominator dependent on numerator collection
     # clearly that workflow needs some work to be more intuitive...
     pct_all <- left_join(pct_depends, direct_est, by=c('depends_on_var'='out_table_field', 'GEOID'='GEOID', 'year'='year', 'geotype'='geotype'), suffix=c('_denominator', '_numerator'))
@@ -276,8 +277,10 @@ if(dim(derived)[1] > 0){
   
   # calculate the differences
   if('difference' %in% unique(derived_data$variable_type)){
+    print('Calculating differences.')
+    derived_diff <- derived %>% filter(variable_type == 'difference')
     derived_est_diff <- derived_data %>% filter(variable_type == 'difference') %>% group_by(GEOID, out_table_field, geotype, year) %>% summarize(agg_est = sum(estimate))
-    diff_depends <- left_join(derived_est_diff, derived, by=c('out_table_field'='out_table_field'))
+    diff_depends <- left_join(derived_est_diff, derived_diff, by=c('out_table_field'='out_table_field', 'year'='year', 'geotype'='geography'))
     # currently supported percentage cases collect the larger value as a direct variable and the smaller value dependent on larger value collection
     # clearly that workflow needs some work to be more intuitive...
     diff_all <- left_join(diff_depends, direct_est, by=c('depends_on_var'='out_table_field', 'GEOID'='GEOID', 'year'='year', 'geotype'='geotype'), suffix=c('_subset', '_total'))
@@ -299,10 +302,10 @@ print(
 ############################################
 
 base_data <- final_datasets[[1]]
-print(base_data)
+
 if(length(final_datasets) > 1){
   for(i in 2:length(final_datasets)){
-    base_data <- full_join(base_data, final_datasets[[i]], by=c('GEOID', 'geotype', 'year'), keep=TRUE)
+    base_data <- full_join(base_data, final_datasets[[i]], by=c('GEOID'='GEOID', 'geotype'='geotype', 'year'='year'))
   }
 }
 

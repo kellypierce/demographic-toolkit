@@ -1,6 +1,7 @@
 rm(list=ls())
 library(tidyverse)
 library(tidycensus)
+library(tigris)
 library(sf)
 load('/Users/kpierce/uscb_query_env.RData')
 
@@ -108,6 +109,9 @@ for(year in 2012:2019){
   st_write(tract, fname)
   rm(tract)
 }
+# add 2020
+tract20 <- tracts(year=2020, state='TX', refresh=TRUE)
+st_write(tract20, '/Users/kpierce/CooksProTX/spatial/tigris/texas_census_tracts/census_tracts_2020.shp')
 
 ## counties
 for(year in 2010:2019){
@@ -116,6 +120,10 @@ for(year in 2010:2019){
   st_write(county, fname)
   rm(county)
 }
+# add 2020
+county20 <- counties(year=2020)
+st_write(county20, '/Users/kpierce/CooksProTX/spatial/tigris/usa_counties/counties_2020.shp')
+
 
 ## school districts
 for(year in 2011:2019){
@@ -124,6 +132,10 @@ for(year in 2011:2019){
   st_write(school, fname)
   rm(school)
 }
+# add 2020
+school20 <- school_districts(year=2020, state='TX', refresh=TRUE)
+st_write(school20, '/Users/kpierce/CooksProTX/spatial/tigris/texas_school_districts/school_districs_2020.shp')
+
 
 ## congressional districts
 for(year in 2011:2019){
@@ -132,6 +144,9 @@ for(year in 2011:2019){
   st_write(congress, fname)
   rm(congress)
 }
+congress20 <- congressional_districts(year=2020)
+st_write(congress20, '/Users/kpierce/CooksProTX/spatial/tigris/usa_congressional_districts/congressional_districs_2020.shp')
+
 
 ## state leg districts
 for(year in 2011:2019){
@@ -140,6 +155,8 @@ for(year in 2011:2019){
   st_write(stateleg, fname)
   rm(stateleg)
 }
+stateleg20 <- state_legislative_districts(year=2020, state='TX')
+st_write(stateleg20, '/Users/kpierce/CooksProTX/spatial/tigris/texas_legislative_districts/legislative_districs_2020.shp')
 
 ## core based statistical areas (metropolitan statistical areas and micropolitan statistical areas)
 for(year in 2011:2019){
@@ -148,6 +165,9 @@ for(year in 2011:2019){
   st_write(cbsa, fname)
   rm(cbsa)
 }
+cbsa20 <- core_based_statistical_areas(year=2020)
+st_write(cbsa20, '/Users/kpierce/CooksProTX/spatial/tigris/usa_core_base_statistical_areas/cbsa_2020.shp')
+
 
 ## urban areas (not available for 2012)
 for(year in 2012:2019){
@@ -156,4 +176,6 @@ for(year in 2012:2019){
   st_write(urban, fname)
   rm(urban)
 }
+urban20 <- urban_areas(year=2020, refresh=TRUE)
+st_write(urban20, '/Users/kpierce/CooksProTX/spatial/tigris/usa_urban_areas/urban_areas_2020.shp')
 
